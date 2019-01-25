@@ -106,7 +106,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device):
             # statistics
             running_loss += loss.item() * inputs.size(0)
 
-        epoch_loss = running_loss / dataset_sizes[phase]
+        epoch_loss = running_loss
 
         print('{} Loss: {:.4f}'.format(
             phase, epoch_loss))
