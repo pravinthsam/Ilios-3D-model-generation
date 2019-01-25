@@ -66,7 +66,7 @@ test_dataset = ShapesDataset(test_input, test_output, None)
 dataloader = DataLoader(train_dataset, batch_size=4,
                         shuffle=True, num_workers=4)
 model = UNet()
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
@@ -119,4 +119,4 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device):
         time_elapsed // 60, time_elapsed % 60))
 
 model = train_model(model, criterion, optimizer, exp_lr_scheduler,
-                       num_epochs=1, device='cpu')
+                       num_epochs=1, device='cuda')

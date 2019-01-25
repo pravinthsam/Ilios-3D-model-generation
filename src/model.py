@@ -15,19 +15,19 @@ class UNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.dconv_down1 = double_conv(4, 64)
-        self.dconv_down2 = double_conv(64, 128)
-        self.dconv_down3 = double_conv(128, 256)
-        self.dconv_down4 = double_conv(256, 512)
+        self.dconv_down1 = double_conv(4, 16)
+        self.dconv_down2 = double_conv(16, 32)
+        self.dconv_down3 = double_conv(32, 64)
+        self.dconv_down4 = double_conv(64, 128)
 
         self.maxpool = nn.MaxPool2d(2)
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.dconv_up3 = double_conv(256 + 512, 256)
-        self.dconv_up2 = double_conv(128 + 256, 128)
-        self.dconv_up1 = double_conv(128 + 64, 64)
+        self.dconv_up3 = double_conv(64 + 128, 64)
+        self.dconv_up2 = double_conv(32 + 64, 32)
+        self.dconv_up1 = double_conv(32 + 16, 16)
 
-        self.conv_last = nn.Conv2d(64, 1, 1)
+        self.conv_last = nn.Conv2d(16, 1, 1)
 
 
     def forward(self, x):
