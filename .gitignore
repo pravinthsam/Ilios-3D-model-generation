@@ -1,3 +1,6 @@
+# Ignore exploration notebooks under notebooks folder
+notebooks/**
+
 # Ignore Data files
 data/**
 

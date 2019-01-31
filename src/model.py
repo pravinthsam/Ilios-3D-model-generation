@@ -15,7 +15,7 @@ class UNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.dconv_down1 = double_conv(4, 16)
+        self.dconv_down1 = double_conv(2, 16)
         self.dconv_down2 = double_conv(16, 32)
         self.dconv_down3 = double_conv(32, 64)
         self.dconv_down4 = double_conv(64, 128)
@@ -55,6 +55,9 @@ class UNet(nn.Module):
 
         x = self.dconv_up1(x)
 
-        out = self.conv_last(x)
+        #out = self.conv_last(x)
+        
+        x = self.conv_last(x)
+        out = nn.Sigmoid()(x)
 
         return out

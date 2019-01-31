@@ -41,7 +41,7 @@ def train_test_filenames():
 if __name__ == '__main__':
 
     # Test code which downloads 5 different models from the shapenet dataset
-    for folder in s3_list_subfolders('shapenet-dataset', '03001627/')[:5]:
+    for folder in s3_list_subfolders('shapenet-dataset', '03001627/')[:300]:
         print('Downloading from {}'.format(folder))
         s3_download_folder('shapenet-dataset', folder, 'data/raw')
         print()
