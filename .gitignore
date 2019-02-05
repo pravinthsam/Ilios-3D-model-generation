@@ -1,3 +1,12 @@
+# Ignore model weights for now
+model_weights/**
+
+# Ignore exploration notebooks under notebooks folder
+notebooks/**
+
+# Ignore Data files
+data/**
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
