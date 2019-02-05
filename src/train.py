@@ -12,7 +12,10 @@ from pathlib import Path
 import time
 from tqdm import tqdm
 
-
+MEAN_RGB = [92.15126579, 82.14264333, 73.88362667, 127.5]
+STD_RGB = [108.91613243,  96.48436187,  85.80594293, 127.5]
+MEAN_DEPTH = 126.9202889219637
+STD_DEPTH = 53.334870463885
 
 class ShapesDataset(Dataset):
     '''Generates a Dataset given input 2D images and output 2.5D images'''
@@ -28,14 +31,18 @@ class ShapesDataset(Dataset):
 
     def __getitem__(self, idx):
         input_path = './'+self.input_paths[idx]
-        input_image = io.imread(input_path)[:, :, [0,3]].transpose((2, 0, 1))/255.0
+        input_image = io.imread(input_path)
+        input_image = (input_image-MEAN_RGB)/STD_RGB
+        input_image = input_image.transpose((2, 0, 1))
         input_tensor = torch.from_numpy(input_image).double()
 
         if self.output_paths is  None:
             sample = {'input': input_tensor}
         else:
             output_path = './'+self.output_paths[idx]
-            output_image = io.imread(output_path)[:, :, [0]].transpose((2, 0, 1))/255.0
+            output_image = io.imread(output_path)[:, :, [0]]
+            output_image = (output_image-MEAN_DEPTH)/STD_DEPTH
+            output_image = output_image.transpose((2, 0, 1))
             output_tensor = torch.from_numpy(output_image).double()
 
             sample = {'input': input_tensor, 'output': output_tensor}
@@ -109,7 +116,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
 
 if __name__ == '__main__':
 
-    NUM_EPOCHS = 10
+    NUM_EPOCHS = 100
     MODEL_WEIGHTS_PATH = './model_weights/unet.pth'
 
     dataloader = load_dataset()
@@ -125,7 +132,7 @@ if __name__ == '__main__':
 
 
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.000001)
+    optimizer = optim.Adam(model.parameters(), lr=0.00000001)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs=NUM_EPOCHS, device='cuda', dataloader=dataloader)
     torch.save({'epoch': start_epoch + NUM_EPOCHS, 'state_dict':model.state_dict()}, MODEL_WEIGHTS_PATH)

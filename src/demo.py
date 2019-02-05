@@ -1,10 +1,11 @@
-from train import ShapesDataset
+from train import ShapesDataset, MEAN_DEPTH, STD_DEPTH
 from model import UNet
 
 import sys
 from pathlib import Path
 from tqdm import tqdm
 from skimage import io
+import numpy as np
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -53,4 +54,6 @@ if __name__ == '__main__':
 
         for i in range(outputs.shape[0]):
             depth = outputs[i, 0, :, :]
+            depth = depth*STD_DEPTH + MEAN_DEPTH
+            depth = np.clip(depth, 0.0, 255.0).astype('uint8')
             io.imsave('file{}.png'.format(i), depth)
