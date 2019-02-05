@@ -1,3 +1,6 @@
+# Ignore model weights for now
+model_weights/**
+
 # Ignore exploration notebooks under notebooks folder
 notebooks/**
 
