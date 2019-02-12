@@ -5,27 +5,14 @@ import scipy.io
 import tensorflow as tf
 import tools
 
+import config
+
 vox_res64 = 64
 vox_rex256 = 256
 batch_size = 4
 GPU0 = '0'
 re_train=False
 
-#########################
-config={}
-config['batch_size']=batch_size
-config['vox_res_x'] = vox_res64
-config['vox_res_y'] = vox_rex256
-config['train_names']=['P1_02828884_bench','P1_03001627_chair','P1_04256520_couch', 'P1_04379243_table']
-for name in config['train_names']:
-    config['X_train_'+name] = './Data_sample/'+name+'/train_125_25d_vox256/'
-    config['Y_train_'+name] = './Data_sample/'+name+'/train_125_3d_vox256/'
-
-config['test_names']=['P1_02828884_bench','P1_03001627_chair','P1_04256520_couch', 'P1_04379243_table']
-for name in config['test_names']:
-    config['X_test_'+name]= './Data_sample/'+name+'/test_125_25d_vox256/'
-    config['Y_test_'+name]= './Data_sample/'+name+'/test_125_3d_vox256/'
-#########################
 
 class Network:
     def __init__(self, demo_only=False):

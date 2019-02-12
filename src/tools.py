@@ -17,6 +17,9 @@ from skimage.measure import block_reduce
 import skimage
 import threading
 import sys
+
+import glob
+
 if sys.version_info >=(2,0):
     print (sys.version)
     import Queue as queue
@@ -34,17 +37,20 @@ class Data(threading.Thread):
         self.batch_size = config['batch_size']
         self.vox_res_x = config['vox_res_x']
         self.vox_res_y = config['vox_res_y']
-        self.train_names = config['train_names']
-        self.test_names = config['test_names']
+        self.categories = config['categories']
 
         self.queue_train = queue.Queue(3)
         self.stop_queue = False
 
+
+        self.X_files, self.Y_files = self.load_X_Y_files_paths_all(self.categories)
+
+        self.X_train_files, self.Y_train_files = self.X_files, self.Y_files
+        self.X_test_files, self.Y_test_files = [], []
+        ''' TODO train test split
         self.X_train_files, self.Y_train_files = self.load_X_Y_files_paths_all( self.train_names,label='train')
         self.X_test_files, self.Y_test_files = self.load_X_Y_files_paths_all(self.test_names, label='test')
-
-        print ('X_train_files:',len(self.X_train_files))
-        print ('X_test_files:',len(self.X_test_files))
+        '''
 
         self.total_train_batch_num = int(len(self.X_train_files) // self.batch_size)
         self.total_test_seq_batch = int(len(self.X_test_files) // self.batch_size)
@@ -203,77 +209,56 @@ class Data(threading.Thread):
         return vox
 
     @staticmethod
-    def depth_to_voxel(in_depth_path):
+    def depth_to_voxel(in_depth_path, out_vox_res):
+
         xyz_pc = single_depth_2_pc(in_depth_path)
-        vox = voxelization(xyz_pc)
+        vox = voxelization(xyz_pc, vox_res = out_vox_res)
         return vox
 
-    def load_X_Y_files_paths_all(self, obj_names, label='train'):
-        x_str=''
-        y_str=''
-        if label =='train':
-            x_str='X_train_'
-            y_str ='Y_train_'
-        elif label == 'test':
-            x_str = 'X_test_'
-            y_str = 'Y_test_'
-        else:
-            print ("label error!!")
-            exit()
-
+    def load_X_Y_files_paths_all(self, categories):
         X_data_files_all = []
-        Y_data_files_all = []
-        for name in obj_names:
-            X_folder = self.config[x_str + name]
-            Y_folder = self.config[y_str + name]
-            X_data_files = [X_f for X_f in sorted(os.listdir(X_folder))]
-            Y_data_files = [Y_f for Y_f in sorted(os.listdir(Y_folder))]
+        for category in categories:
+            if sys.version_info >=(3,0):
+                X_data_files_all.extend(glob.glob('./data/processed/{}/**/*depth*.png'.format(category), recursive=True))
+            if sys.version_info >=(2,0):
+                X_data_files_all.extend(glob.glob('./data/processed/{}/**/*depth*.png'.format(category)))
 
-            for X_f, Y_f in zip(X_data_files, Y_data_files):
-                if X_f[0:15] != Y_f[0:15]:
-                    print ("index inconsistent!!")
-                    exit()
-                X_data_files_all.append(X_folder + X_f)
-                Y_data_files_all.append(Y_folder + Y_f)
+            Y_data_files_all = []
+
         return X_data_files_all, Y_data_files_all
 
-    def load_X_Y_voxel_grids(self,X_data_files, Y_data_files):
+    def load_X_Y_voxel_grids(self, X_data_files, Y_data_files):
+        '''
         if len(X_data_files) !=self.batch_size or len(Y_data_files)!=self.batch_size:
             print ("load_X_Y_voxel_grids error:", X_data_files, Y_data_files)
             exit()
+        '''
 
         X_voxel_grids = []
         Y_voxel_grids = []
         index = -1
+        print(Y_data_files)
         for X_f, Y_f in zip(X_data_files, Y_data_files):
+            print('Loading {} and {}...'.format(X_f, Y_f))
             index += 1
-            X_voxel_grid = self.load_single_voxel_grid(X_f, out_vox_res=self.vox_res_x)
+            X_voxel_grid = self.depth_to_voxel(X_f, out_vox_res=self.vox_res_x)
             X_voxel_grids.append(X_voxel_grid)
 
-            Y_voxel_grid = self.load_single_voxel_grid(Y_f, out_vox_res=self.vox_res_y)
-            Y_voxel_grids.append(Y_voxel_grid)
+            # TODO process Y as well
+            #Y_voxel_grid = self.load_single_voxel_grid(Y_f, out_vox_res=self.vox_res_y)
+            #Y_voxel_grids.append(Y_voxel_grid)
 
         X_voxel_grids = np.asarray(X_voxel_grids)
         Y_voxel_grids = np.asarray(Y_voxel_grids)
         return X_voxel_grids, Y_voxel_grids
 
-    def shuffle_X_Y_files(self, label='train'):
-        X_new = []; Y_new = []
-        if label == 'train':
-            X = self.X_train_files; Y = self.Y_train_files
-            self.train_batch_index = 0
-            index = list(range(len(X)))
-            shuffle(index)
-            for i in index:
-                X_new.append(X[i])
-                Y_new.append(Y[i])
-            self.X_train_files = X_new
-            self.Y_train_files = Y_new
-        else:
-            print ("shuffle_X_Y_files error!\n")
-            exit()
+    def shuffle_X_Y_files(self):
 
-    ###################### voxel grids
+        temp = list(zip(self.X_train_files, self.Y_train_files))
+        random.shuffle(temp)
+        self.X_train_files, self.Y_train_files = zip(*temp)
+
+
     def load_X_Y_voxel_grids_train_next_batch(self):
         X_data_files = self.X_train_files[self.batch_size * self.train_batch_index:self.batch_size * (self.train_batch_index + 1)]
         Y_data_files = self.Y_train_files[self.batch_size * self.train_batch_index:self.batch_size * (self.train_batch_index + 1)]
@@ -391,3 +376,15 @@ class Ops:
         y = tf.nn.bias_add(y, b)
         Ops.variable_sum(w, name)
         return y
+
+if __name__ == '__main__':
+    from config import config
+    if sys.version_info>=(2,0):
+        print(2)
+    if sys.version_info>=(3,0):
+        print(3)
+    print(config)
+    d = Data(config)
+    z = d.load_X_Y_voxel_grids_train_next_batch()
+    print(z[0].shape, z[1].shape)
+    print('hello1')
