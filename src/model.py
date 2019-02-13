@@ -1,13 +1,16 @@
 import torch
 import torch.nn as nn
 
-def double_conv(in_channels, out_channels):
+def triple_conv(in_channels, out_channels):
     '''Helper function to generate double convolution operation'''
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, 3, padding=1),
         nn.ReLU(inplace=True),
         nn.Conv2d(out_channels, out_channels, 3, padding=1),
-        nn.ReLU(inplace=True)
+        nn.ReLU(inplace=True),
+        nn.Conv2d(out_channels, out_channels, 3, padding=1),
+        nn.ReLU(inplace=True),
+        nn.BatchNorm2d(out_channels)
     )
 
 
@@ -17,17 +20,17 @@ class UNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.dconv_down1 = double_conv(4, 64)
-        self.dconv_down2 = double_conv(64, 128)
-        self.dconv_down3 = double_conv(128, 256)
-        self.dconv_down4 = double_conv(256, 512)
+        self.dconv_down1 = triple_conv(4, 64)
+        self.dconv_down2 = triple_conv(64, 128)
+        self.dconv_down3 = triple_conv(128, 256)
+        self.dconv_down4 = triple_conv(256, 512)
 
         self.maxpool = nn.MaxPool2d(2)
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.dconv_up3 = double_conv(256 + 512, 256)
-        self.dconv_up2 = double_conv(128 + 256, 128)
-        self.dconv_up1 = double_conv(128 + 64, 64)
+        self.dconv_up3 = triple_conv(256 + 512, 256)
+        self.dconv_up2 = triple_conv(128 + 256, 128)
+        self.dconv_up1 = triple_conv(128 + 64, 64)
 
         self.conv_last = nn.Conv2d(64, 1, 1)
 

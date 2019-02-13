@@ -14,8 +14,8 @@ from tqdm import tqdm
 
 MEAN_RGB = [92.15126579, 82.14264333, 73.88362667, 127.5]
 STD_RGB = [108.91613243,  96.48436187,  85.80594293, 127.5]
-MEAN_DEPTH = 126.9202889219637
-STD_DEPTH = 53.334870463885
+MEAN_DEPTH = 0.0
+STD_DEPTH = 255.0
 
 class ShapesDataset(Dataset):
     '''Generates a Dataset given input 2D images and output 2.5D images'''
@@ -57,7 +57,7 @@ def load_dataset():
     train_dataset = ShapesDataset(train_input, train_output, None)
     test_dataset = ShapesDataset(test_input, test_output, None)
 
-    dataloader = DataLoader(train_dataset, batch_size=6,
+    dataloader = DataLoader(train_dataset, batch_size=4,
                             shuffle=True, num_workers=4)
     return dataloader
 
@@ -90,6 +90,12 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
             # track history if only in train
             with torch.set_grad_enabled(True):
                 outputs = model(inputs)
+
+                # Create mask to output so bg doesn't contribute to Loss
+                mask = inputs[:, 3, :, :]
+                mask = (mask<0.5)[:, None, :, :]
+                outputs[mask] = 1.0
+
                 loss = criterion(outputs, depths)
 
                 # backward + optimize only if in training phase
@@ -99,7 +105,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
                 #return outputs
             # statistics
             running_loss += loss.item() * inputs.size(0)
-
             #break
 
         epoch_loss = running_loss/(len(dataloader)*dataloader.batch_size)
@@ -116,7 +121,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
 
 if __name__ == '__main__':
 
-    NUM_EPOCHS = 100
+    NUM_EPOCHS = 20
     MODEL_WEIGHTS_PATH = './model_weights/unet.pth'
 
     dataloader = load_dataset()
@@ -132,7 +137,7 @@ if __name__ == '__main__':
 
 
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.00000001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs=NUM_EPOCHS, device='cuda', dataloader=dataloader)
     torch.save({'epoch': start_epoch + NUM_EPOCHS, 'state_dict':model.state_dict()}, MODEL_WEIGHTS_PATH)

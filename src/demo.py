@@ -49,6 +49,9 @@ if __name__ == '__main__':
 
         with torch.no_grad():
             outputs = model(inputs)
+            mask = inputs[:, 3, :, :]
+            mask = (mask<0.5)[:, None, :, :]
+            outputs[mask] = 1.0
             outputs = outputs.to('cpu')
         outputs = outputs.detach().numpy()
 
