@@ -138,8 +138,8 @@ def parent_obj_to_camera(b_camera):
 
 
 scene = bpy.context.scene
-scene.render.resolution_x = 600
-scene.render.resolution_y = 600
+scene.render.resolution_x = 512
+scene.render.resolution_y = 512
 scene.render.resolution_percentage = 100
 scene.render.alpha_mode = 'TRANSPARENT'
 cam = scene.objects['Camera']
