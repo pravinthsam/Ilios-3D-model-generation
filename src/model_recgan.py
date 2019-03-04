@@ -5,25 +5,39 @@ import scipy.io
 import tensorflow as tf
 import tools
 
-import config
+from config import config
+
+import time
 
 vox_res64 = 64
 vox_rex256 = 256
 batch_size = 4
 GPU0 = '0'
-re_train=False
+re_train=config['re_train']
 
 
 class Network:
-    def __init__(self, demo_only=False):
+    def __init__(self, demo_only=False, config=None):
+
+        if config is None:
+            self.epochs = 10
+        else:
+            self.epochs = config['train_epochs']
+
         if demo_only:
             return  # no need to creat folders
         self.train_mod_dir = './train_mod/'
-        self.train_sum_dir = './train_sum/'
-        self.test_res_dir = './test_res/'
-        self.test_sum_dir = './test_sum/'
+        self.train_sum_dir = './summaries/train_sum/'
+        self.test_res_dir = './summaries/test_res/'
+        self.test_sum_dir = './summaries/test_sum/'
+        self.global_vars = './summaries/global_vars'
 
         print ("re_train:", re_train)
+
+        if not os.path.exists(self.global_vars):
+            os.makedirs(self.global_vars)
+            print ('global_vars: created!')
+
         if os.path.exists(self.test_res_dir):
             if re_train:
                 print ("test_res_dir and files kept!")
@@ -210,10 +224,27 @@ class Network:
         return 0
 
     def train(self, data):
-        for epoch in range(10):
-            data.shuffle_X_Y_files(label='train')
+
+        # Read from global_vars and get global_step and global_epoch
+        if os.path.exists(os.path.join(self.global_vars, 'global_step')):
+            with open(os.path.join(self.global_vars, 'global_step'), 'r') as f:
+                previous_step = int(f.read())
+        else:
+            previous_step = 0
+
+        if os.path.exists(os.path.join(self.global_vars, 'global_epoch')):
+            with open(os.path.join(self.global_vars, 'global_epoch'), 'r') as f:
+                previous_epoch = int(f.read())
+        else:
+            previous_epoch = 0
+
+        print('Model has completed {} epochs and has seen {} batches'.format(previous_epoch, previous_step))
+
+        for epoch in range(self.epochs):
+            data.shuffle_X_Y_files()
             total_train_batch_num = data.total_train_batch_num
             print ('total_train_batch_num:', total_train_batch_num)
+            print ('epochs:', self.epochs)
             for i in range(total_train_batch_num):
 
                 #################### training
@@ -221,39 +252,50 @@ class Network:
                 self.sess.run(self.dis_optim, feed_dict={self.X:X_train_batch, self.Y:Y_train_batch})
                 self.sess.run(self.aeu_g_optim, feed_dict={self.X:X_train_batch, self.Y:Y_train_batch})
 
-                aeu_loss_c, gan_g_loss_c, gan_d_loss_no_gp_c, gan_d_loss_gp_c, sum_train = self.sess.run(
+                '''aeu_loss_c, gan_g_loss_c, gan_d_loss_no_gp_c, gan_d_loss_gp_c, sum_train = self.sess.run(
                 [self.aeu_loss, self.gan_g_loss, self.gan_d_loss_no_gp, self.gan_d_loss_gp, self.sum_merged],
+                feed_dict={self.X:X_train_batch, self.Y:Y_train_batch})'''
+                aeu_loss_c, gan_g_loss_c, gan_d_loss_no_gp_c, gan_d_loss_gp_c, sum_train, Y_pred = self.sess.run(
+                [self.aeu_loss, self.gan_g_loss, self.gan_d_loss_no_gp, self.gan_d_loss_gp, self.sum_merged, self.Y_pred],
                 feed_dict={self.X:X_train_batch, self.Y:Y_train_batch})
 
-                if i%200==0:
-                    self.sum_writer_train.add_summary(sum_train, epoch * total_train_batch_num + i)
+                X_train_batch = X_train_batch.astype(np.int8)
+                Y_pred_batch=Y_pred.astype(np.float16)
+                Y_train_batch = Y_train_batch.astype(np.int8)
+
+
+                self.sum_writer_train.add_summary(sum_train, previous_step + epoch * total_train_batch_num + i)
+                with open(os.path.join(self.global_vars, 'global_step'), 'w') as f:
+                    f.write(str(previous_step + epoch * total_train_batch_num + i + 1))
+
                 print ('ep:',epoch,'i:',i, 'train aeu loss:',aeu_loss_c, 'gan g loss:',gan_g_loss_c,
                        'gan d loss no gp:',gan_d_loss_no_gp_c,'gan d loss gp:', gan_d_loss_gp_c)
 
-                #################### testing
-                if i%600==0:
-                    X_test_batch, Y_test_batch = data.load_X_Y_voxel_grids_test_next_batch()
 
-                    aeu_loss_t, gan_g_loss_t, gan_d_loss_no_gp_t, gan_d_loss_gp_t, Y_pred_t, sum_test = self.sess.run(
-                    [self.aeu_loss, self.gan_g_loss, self.gan_d_loss_no_gp, self.gan_d_loss_gp, self.Y_pred, self.sum_merged],
-                    feed_dict={self.X:X_test_batch, self.Y:Y_test_batch})
+            #################### testing
+            with open(os.path.join(self.global_vars, 'global_epoch'), 'w') as f:
+                f.write(str(previous_epoch + epoch+1))
+            X_test_batch, Y_test_batch = data.load_X_Y_voxel_grids_test_next_batch()
 
-                    X_test_batch=X_test_batch.astype(np.int8)
-                    Y_pred_t=Y_pred_t.astype(np.float16)
-                    Y_test_batch=Y_test_batch.astype(np.int8)
-                    to_save = {'X_test':X_test_batch, 'Y_test_pred':Y_pred_t, 'Y_test_true':Y_test_batch}
+            aeu_loss_t, gan_g_loss_t, gan_d_loss_no_gp_t, gan_d_loss_gp_t, Y_pred_t, sum_test = self.sess.run(
+            [self.aeu_loss, self.gan_g_loss, self.gan_d_loss_no_gp, self.gan_d_loss_gp, self.Y_pred, self.sum_merged],
+            feed_dict={self.X:X_test_batch, self.Y:Y_test_batch})
 
-                    scipy.io.savemat(self.test_res_dir+'X_Y_pred_'+str(epoch).zfill(2)+'_'+str(i).zfill(5)+'.mat',
-                    to_save, do_compression=True)
+            X_test_batch=X_test_batch.astype(np.int8)
+            Y_pred_t=Y_pred_t.astype(np.float16)
+            Y_test_batch=Y_test_batch.astype(np.int8)
+            to_save = {'X_test':X_test_batch, 'Y_test_pred':Y_pred_t, 'Y_test_true':Y_test_batch}
 
-                    self.sum_write_test.add_summary(sum_test, epoch*total_train_batch_num+i)
-                    print ('ep:',epoch, 'i:', i, 'test aeu loss:', aeu_loss_t,'gan g loss:', gan_g_loss_t,
-                           'gan d loss no gp:',gan_d_loss_no_gp_t,'gan d loss gp:',gan_d_loss_gp_t)
+            scipy.io.savemat(self.test_res_dir+'X_Y_pred_'+str(epoch).zfill(2)+'_'+str(i).zfill(5)+'.mat',
+            to_save, do_compression=True)
 
-                #### model saving
-                if i%600 == 0 and i > 0:
-                    self.saver.save(self.sess, save_path=self.train_mod_dir + 'model.cptk')
-                    print ('ep:', epoch, 'i:', i, 'model saved!')
+            self.sum_write_test.add_summary(sum_test, previous_step+epoch*total_train_batch_num+i)
+            print ('ep:',epoch, 'i:', i, 'test aeu loss:', aeu_loss_t,'gan g loss:', gan_g_loss_t,
+                   'gan d loss no gp:',gan_d_loss_no_gp_t,'gan d loss gp:',gan_d_loss_gp_t)
+
+            #### model saving
+            self.saver.save(self.sess, save_path=self.train_mod_dir + 'model.cptk')
+            print ('ep:', epoch, 'i:', i, 'model saved!')
 
         data.stop_queue=True
 
@@ -262,6 +304,9 @@ if __name__ == '__main__':
     data = tools.Data(config)
     data.daemon = True
     data.start()
-    net = Network()
+    net = Network(config=config)
     net.build_graph()
+    start = time.time()
     net.train(data)
+    end = time.time()
+    print('Training took {}s...'.format(end-start))

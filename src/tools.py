@@ -14,9 +14,11 @@ import copy
 import math
 import random
 from skimage.measure import block_reduce
-import skimage
+from skimage import io, img_as_float
 import threading
 import sys
+
+from sklearn.model_selection import train_test_split
 
 import glob
 
@@ -39,14 +41,17 @@ class Data(threading.Thread):
         self.vox_res_y = config['vox_res_y']
         self.categories = config['categories']
 
+        self.train_test_split_seed = config['random_seed']
+
         self.queue_train = queue.Queue(3)
         self.stop_queue = False
 
+        self.train_cads, self.test_cads = self.load_cads(self.categories)
 
         self.X_files, self.Y_files = self.load_X_Y_files_paths_all(self.categories)
 
-        self.X_train_files, self.Y_train_files = self.X_files, self.Y_files
-        self.X_test_files, self.Y_test_files = [], []
+        self.X_train_files, self.Y_train_files = self.filter(self.X_files, self.Y_files, self.train_cads)
+        self.X_test_files, self.Y_test_files = self.filter(self.X_files, self.Y_files, self.test_cads)
         ''' TODO train test split
         self.X_train_files, self.Y_train_files = self.load_X_Y_files_paths_all( self.train_names,label='train')
         self.X_test_files, self.Y_test_files = self.load_X_Y_files_paths_all(self.test_names, label='test')
@@ -55,24 +60,6 @@ class Data(threading.Thread):
         self.total_train_batch_num = int(len(self.X_train_files) // self.batch_size)
         self.total_test_seq_batch = int(len(self.X_test_files) // self.batch_size)
 
-    @staticmethod
-    def plotFromVoxels(voxels,title=''):
-        # TODO change to blender render
-        if len(voxels.shape)>3:
-            x_d = voxels.shape[0]
-            y_d = voxels.shape[1]
-            z_d = voxels.shape[2]
-            v = voxels[:,:,:,0]
-            v = np.reshape(v,(x_d,y_d,z_d))
-        else:
-            v = voxels
-        x, y, z = v.nonzero()
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(x, y, z, zdir='z', c='red')
-        plt.show()
-        plt.title(title)
-        show(block=False)
 
     @staticmethod
     def vox_down_single(vox, to_res):
@@ -150,8 +137,7 @@ class Data(threading.Thread):
     @staticmethod
     def single_depth_2_pc(in_depth_path):
         '''Converts a depth image to an array of xyz'''
-        depth = skimage.io.imread(in_depth_path)
-        depth = np.asarray(depth, dtype=np.float32)
+        depth = img_as_float(io.imread(in_depth_path)[:, :, 0])
 
         h = depth.shape[0]
         w = depth.shape[1]
@@ -211,22 +197,33 @@ class Data(threading.Thread):
     @staticmethod
     def depth_to_voxel(in_depth_path, out_vox_res):
 
-        xyz_pc = single_depth_2_pc(in_depth_path)
-        vox = voxelization(xyz_pc, vox_res = out_vox_res)
+        xyz_pc = Data.single_depth_2_pc(in_depth_path)
+        vox = Data.voxelization(xyz_pc, vox_res = out_vox_res)
+        vox = Data.voxel_grid_padding(vox)[:, :, :, 0]
         return vox
 
+    def load_cads(self, categories):
+        cads = []
+        for category in categories:
+            cads.extend(glob.glob('./data/processed/{}/*'.format(category)))
+        train_cads, test_cads = train_test_split(cads, train_size=0.8, random_state = self.train_test_split_seed)
+        return train_cads, test_cads
     def load_X_Y_files_paths_all(self, categories):
         X_data_files_all = []
         for category in categories:
-            if sys.version_info >=(3,0):
-                X_data_files_all.extend(glob.glob('./data/processed/{}/**/*depth*.png'.format(category), recursive=True))
-            if sys.version_info >=(2,0):
-                X_data_files_all.extend(glob.glob('./data/processed/{}/**/*depth*.png'.format(category)))
+            X_data_files_all.extend(glob.glob('./data/processed/{}/*/models/*000*depth*.png'.format(category)))
 
-            Y_data_files_all = []
+        Y_data_files_all = [ '/'.join(file_path.split('/')[:-1] + ['voxel.npy']) for file_path in X_data_files_all]
 
         return X_data_files_all, Y_data_files_all
 
+    def filter(self, X_files, Y_files, cads):
+        X_filtered, Y_filtered = [], []
+        for X, Y in zip(X_files, Y_files):
+            if any([cad in X for cad in cads]):
+                X_filtered.append(X)
+                Y_filtered.append(Y)
+        return X_filtered, Y_filtered
     def load_X_Y_voxel_grids(self, X_data_files, Y_data_files):
         '''
         if len(X_data_files) !=self.batch_size or len(Y_data_files)!=self.batch_size:
@@ -237,16 +234,16 @@ class Data(threading.Thread):
         X_voxel_grids = []
         Y_voxel_grids = []
         index = -1
-        print(Y_data_files)
+
         for X_f, Y_f in zip(X_data_files, Y_data_files):
-            print('Loading {} and {}...'.format(X_f, Y_f))
             index += 1
-            X_voxel_grid = self.depth_to_voxel(X_f, out_vox_res=self.vox_res_x)
+            X_voxel_grid = Data.depth_to_voxel(X_f, out_vox_res=self.vox_res_x)
+            X_voxel_grid = Data.vox_down_single(X_voxel_grid, self.vox_res_x)
             X_voxel_grids.append(X_voxel_grid)
 
-            # TODO process Y as well
-            #Y_voxel_grid = self.load_single_voxel_grid(Y_f, out_vox_res=self.vox_res_y)
-            #Y_voxel_grids.append(Y_voxel_grid)
+            Y_voxel_grid = np.reshape(np.load(Y_f), [self.vox_res_y, self.vox_res_y, self.vox_res_y, 1])
+
+            Y_voxel_grids.append(Y_voxel_grid)
 
         X_voxel_grids = np.asarray(X_voxel_grids)
         Y_voxel_grids = np.asarray(Y_voxel_grids)
@@ -267,17 +264,11 @@ class Data(threading.Thread):
         X_voxel_grids, Y_voxel_grids = self.load_X_Y_voxel_grids(X_data_files, Y_data_files)
         return X_voxel_grids, Y_voxel_grids
 
-    def load_X_Y_voxel_grids_test_next_batch(self,fix_sample=False):
-        if fix_sample:
-            random.seed(42)
-        idx = random.sample(range(len(self.X_test_files)), self.batch_size)
-        X_test_files_batch = []
-        Y_test_files_batch = []
-        for i in idx:
-            X_test_files_batch.append(self.X_test_files[i])
-            Y_test_files_batch.append(self.Y_test_files[i])
+    def load_X_Y_voxel_grids_test_next_batch(self, batch_index=0):
+        X_data_files = self.X_test_files[self.batch_size * batch_index:self.batch_size * (batch_index + 1)]
+        Y_data_files = self.Y_test_files[self.batch_size * batch_index:self.batch_size * (batch_index + 1)]
 
-        X_test_batch, Y_test_batch = self.load_X_Y_voxel_grids(X_test_files_batch, Y_test_files_batch)
+        X_test_batch, Y_test_batch = self.load_X_Y_voxel_grids(X_data_files, Y_data_files)
         return X_test_batch, Y_test_batch
 
     def run(self):
@@ -285,8 +276,8 @@ class Data(threading.Thread):
             ## train
             if not self.queue_train.full():
                 if self.train_batch_index>=self.total_train_batch_num:
-                    self.shuffle_X_Y_files(label='train')
-                    print ('shuffle')
+                    self.shuffle_X_Y_files()
+                    self.train_batch_index = 0
                 X_b, Y_b = self.load_X_Y_voxel_grids_train_next_batch()
                 self.queue_train.put((X_b, Y_b))
 
@@ -385,6 +376,16 @@ if __name__ == '__main__':
         print(3)
     print(config)
     d = Data(config)
-    z = d.load_X_Y_voxel_grids_train_next_batch()
-    print(z[0].shape, z[1].shape)
-    print('hello1')
+
+    d.start()
+    for epoch in range(2):
+        for i in range(d.total_train_batch_num):
+            x, y = d.queue_train.get()
+            print(x.shape, y.shape)
+            break
+    d.stop_queue = True
+
+    print('-'*10)
+    for i in range(d.total_test_seq_batch):
+        x, y = d.load_X_Y_voxel_grids_test_next_batch(i)
+        print('-', x.shape, y.shape)
