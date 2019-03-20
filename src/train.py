@@ -1,4 +1,4 @@
-from model import UNet
+from model_unet import UNet
 from data import train_test_filenames
 from skimage import io, transform
 import torch
@@ -102,10 +102,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
                 loss.backward()
                 optimizer.step()
 
-                #return outputs
             # statistics
             running_loss += loss.item() * inputs.size(0)
-            #break
 
         epoch_loss = running_loss/(len(dataloader)*dataloader.batch_size)
 
@@ -121,7 +119,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs, device, data
 
 if __name__ == '__main__':
 
-    NUM_EPOCHS = 20
+    NUM_EPOCHS = 1
     MODEL_WEIGHTS_PATH = './model_weights/unet.pth'
 
     dataloader = load_dataset()

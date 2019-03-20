@@ -1,12 +1,14 @@
-# Ignore model weights for now
-model_weights/**
-train_mod*/**
+# Ignore model weights
+models/**
 
 # Ignore summaries
 summaries/**
 
 # Ignore exploration notebooks under notebooks folder
 notebooks/**
+
+# Ignore demo files
+demo/**
 
 # Ignore Data files
 data/**
