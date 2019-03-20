@@ -4,6 +4,7 @@ import numpy as np
 import scipy.io
 import tensorflow as tf
 import tools
+import glob
 
 from config import config
 
@@ -11,26 +12,26 @@ import time
 
 vox_res64 = 64
 vox_rex256 = 256
-batch_size = 4
 GPU0 = '0'
-re_train=config['re_train']
+re_train=True
 
 
 class Network:
-    def __init__(self, demo_only=False, config=None):
+    def __init__(self, config=None):
 
         if config is None:
             self.epochs = 10
+            self.batch_size = 4
         else:
             self.epochs = config['train_epochs']
+            self.batch_size = config['batch_size']
 
-        if demo_only:
-            return  # no need to creat folders
-        self.train_mod_dir = './train_mod/'
-        self.train_sum_dir = './summaries/train_sum/'
-        self.test_res_dir = './summaries/test_res/'
-        self.test_sum_dir = './summaries/test_sum/'
-        self.global_vars = './summaries/global_vars'
+        self.train_mod_dir = './models/recgan/'
+        self.train_sum_dir = './summaries/train_sum_r/'
+        self.test_res_dir = './summaries/test_res_r/'
+        self.test_sum_dir = './summaries/test_sum_r/'
+        self.global_vars = './summaries/global_vars_r'
+        self.demo_dir = './demo/'
 
         print ("re_train:", re_train)
 
@@ -208,6 +209,8 @@ class Network:
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.visible_device_list = GPU0
 
+        print(self.train_sum_dir)
+
         self.sess = tf.Session(config=config)
         self.sum_writer_train = tf.summary.FileWriter(self.train_sum_dir, self.sess.graph)
         self.sum_write_test = tf.summary.FileWriter(self.test_sum_dir)
@@ -298,6 +301,41 @@ class Network:
             print ('ep:', epoch, 'i:', i, 'model saved!')
 
         data.stop_queue=True
+    def demo(self):
+
+        d = tools.Data(config)
+
+        if not os.path.exists(self.demo_dir+'depth/'):
+            print('Demo depth folder not present!!!')
+            return
+
+        filenames = glob.glob(self.demo_dir+'depth/*')
+
+        if len(filenames) == 0:
+            print('No files found in depth folder!!')
+            return
+
+        if not os.path.exists(self.demo_dir+'voxel/'):
+            os.makedirs(self.demo_dir+'voxel/')
+
+        if len(filenames)%self.batch_size != 0:
+            print('Number of images should be a multiple of batch size ({})'.format(self.batch_size))
+            return
+
+        for i in range(len(filenames)//self.batch_size):
+            X_data_files = filenames[self.batch_size * i:self.batch_size * (i + 1)]
+
+            X_test_batch = d.load_X_Y_voxel_grids(X_data_files)
+
+            Y_pred_batch = self.sess.run(self.Y_pred,  feed_dict={
+                                    self.X:X_test_batch
+                                })
+            
+            for i, filename in enumerate(X_data_files):
+                np.save(filename.replace('/depth/',
+                        '/voxel/').replace('.png', '.npy'),
+                        Y_pred_batch[i, :, :, :, :])
+
 
 #########################
 if __name__ == '__main__':

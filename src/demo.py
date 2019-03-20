@@ -1,62 +1,56 @@
-from train import ShapesDataset, MEAN_DEPTH, STD_DEPTH
-from model import UNet
-
-import sys
-from pathlib import Path
-from tqdm import tqdm
-from skimage import io
+from model_unet import Network as Unet_Model
+from model_recgan import Network as RecGan_Model
+from config import config
+import binvox_rw as binvox
+import time
+import glob
 import numpy as np
 
-import torch
-from torch.utils.data import Dataset, DataLoader
-import torch.nn as nn
-from torchvision import transforms
+from multiprocessing import Pool
 
+def run_process(_process, process_name):
+    '''
+    Necessary because tensorflow allocates gpu memory
+    till calling process ends
+    '''
+    start = time.time()
+    p = Pool(1)
+    p.map(_process, [()])
+    p.close()
+    p.join()
+    end = time.time()
+    print('{} took {}s...'.format(process_name, end-start))
+
+def unet_inference(_):
+    unet = Unet_Model(config)
+    unet.build_graph()
+    unet.demo()
+
+def recgan_inference(_):
+    recgan = RecGan_Model(config)
+    recgan.build_graph()
+    recgan.demo()
+
+def pred_to_binvox(voxel_file):
+    voxel = np.load(voxel_file)[:, :, :, 0]
+    voxel = voxel > config['voxel_pred_threshold']
+    bvox = binvox.Voxels(voxel, voxel.shape, [0.0, 0.0, 0.0], 0.684696, 'xyz')
+    fname = voxel_file.replace('npy', 'binvox')
+    with open(fname, 'wb') as f:
+        bvox.write(f)
+
+def binvox_generation(_):
+    voxel_files = glob.glob('./demo/voxel/*.npy')
+    for voxel_file in voxel_files:
+        pred_to_binvox(voxel_file)
 
 if __name__ == '__main__':
 
-    MODEL_WEIGHTS_PATH = './model_weights/unet.pth'
-    model = UNet()
+    # Depth inference
+    run_process(unet_inference, 'Depth inference')
 
-    if Path(MODEL_WEIGHTS_PATH).exists():
-        print('Checkpoint found...')
-        checkpoint = torch.load(MODEL_WEIGHTS_PATH)
-        start_epoch = checkpoint['epoch']
-        model.load_state_dict(checkpoint['state_dict'])
-        print('Loaded model weights which have been trained for {} epochs'.format(start_epoch))
+    # Voxel inference
+    run_process(recgan_inference, 'Voxel inference')
 
-
-    if len(sys.argv) == 1:
-        raise ValueError('There should be atleast one file name')
-
-    input_files = sys.argv[1:]
-
-    # TODO this part should be imported from load_dataset
-    data_transform = transforms.Compose([transforms.ToTensor()])
-    dataset = ShapesDataset(input_files, None, None)
-    dataloader = DataLoader(dataset, batch_size=6,
-                            shuffle=True, num_workers=4)
-    #############
-
-    DEVICE = 'cuda'
-
-    model.to(DEVICE)
-
-    all_outputs = []
-
-    for d in tqdm(dataloader):
-        inputs = d['input'].float().to(DEVICE)
-
-        with torch.no_grad():
-            outputs = model(inputs)
-            mask = inputs[:, 3, :, :]
-            mask = (mask<0.5)[:, None, :, :]
-            outputs[mask] = 1.0
-            outputs = outputs.to('cpu')
-        outputs = outputs.detach().numpy()
-
-        for i in range(outputs.shape[0]):
-            depth = outputs[i, 0, :, :]
-            depth = depth*STD_DEPTH + MEAN_DEPTH
-            depth = np.clip(depth, 0.0, 255.0).astype('uint8')
-            io.imsave('file{}.png'.format(i), depth)
+    # Convert voxel npy files to binvox files
+    run_process(binvox_generation, 'Binvox generation')

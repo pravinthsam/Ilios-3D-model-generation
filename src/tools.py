@@ -15,6 +15,7 @@ import math
 import random
 from skimage.measure import block_reduce
 from skimage import io, img_as_float
+from skimage.transform import resize
 import threading
 import sys
 
@@ -28,6 +29,108 @@ if sys.version_info >=(2,0):
 if sys.version_info >=(3,0):
     print (sys.version)
     import queue
+
+
+class Data_depth(threading.Thread):
+    def __init__(self,config):
+        super(Data_depth,self).__init__()
+        self.config = config
+        self.train_batch_index = 0
+        self.test_seq_index = 0
+
+        self.batch_size = config['batch_size']
+        self.vox_res_x = config['vox_res_unet']
+        self.categories = config['categories']
+
+        self.train_test_split_seed = config['random_seed']
+
+        self.queue_train = queue.Queue(3)
+        self.stop_queue = False
+
+        self.train_cads, self.test_cads = self.load_cads(self.categories)
+        self.train_cads = self.train_cads[:10]
+
+        self.X_files, self.Y_files = self.load_X_Y_files_paths_all(self.categories)
+
+        self.X_train_files, self.Y_train_files = self.filter(self.X_files, self.Y_files, self.train_cads)
+        self.X_test_files, self.Y_test_files = self.filter(self.X_files, self.Y_files, self.test_cads)
+
+        self.total_train_batch_num = int(len(self.X_train_files) // self.batch_size)
+        self.total_test_seq_batch = int(len(self.X_test_files) // self.batch_size)
+
+    def load_cads(self, categories):
+        cads = []
+        for category in categories:
+            cads.extend(glob.glob('./data/processed/{}/*'.format(category)))
+        train_cads, test_cads = train_test_split(cads, train_size=0.8, random_state = self.train_test_split_seed)
+        return train_cads, test_cads
+
+    def load_X_Y_files_paths_all(self, categories):
+        Y_data_files_all = []
+        for category in categories:
+            Y_data_files_all.extend(glob.glob('./data/processed/{}/*/models/*depth*.png'.format(category)))
+
+        X_data_files_all = ['.'+f.replace('_depth', '').split('.')[1]+'.png' for f in Y_data_files_all]
+
+        return X_data_files_all, Y_data_files_all
+
+    def filter(self, X_files, Y_files, cads):
+        X_filtered, Y_filtered = [], []
+        for X, Y in zip(X_files, Y_files):
+            if any([cad in X for cad in cads]):
+                X_filtered.append(X)
+                Y_filtered.append(Y)
+        return X_filtered, Y_filtered
+
+    def shuffle_train_files(self):
+
+        temp = list(zip(self.X_train_files, self.Y_train_files))
+        random.shuffle(temp)
+        self.X_train_files, self.Y_train_files = zip(*temp)
+
+    def load_X_Y_images(self, X_data_files, Y_data_files):
+        X_images = []
+        Y_images = []
+
+        for X_f, Y_f in zip(X_data_files, Y_data_files):
+            X_image = img_as_float(io.imread(X_f))
+            X_image = resize(X_image, (self.vox_res_x, self.vox_res_x, 4))
+            X_image = (X_image-self.config['MEAN_RGB'])/self.config['STD_RGB']
+            Y_image = img_as_float(io.imread(Y_f))[:, :, 0]
+            Y_image = resize(Y_image, (self.vox_res_x, self.vox_res_x))
+            Y_image = Y_image.reshape(Y_image.shape[0], Y_image.shape[1], 1)
+            X_images.append(X_image)
+            Y_images.append(Y_image)
+        X_images = np.asarray(X_images)
+        Y_images = np.asarray(Y_images)
+
+        return X_images, Y_images
+
+
+    def load_train_next_batch(self):
+        X_data_files = self.X_train_files[self.batch_size * self.train_batch_index:self.batch_size * (self.train_batch_index + 1)]
+        Y_data_files = self.Y_train_files[self.batch_size * self.train_batch_index:self.batch_size * (self.train_batch_index + 1)]
+        self.train_batch_index += 1
+
+        X_voxel_grids, Y_voxel_grids = self.load_X_Y_images(X_data_files, Y_data_files)
+        return X_voxel_grids, Y_voxel_grids
+
+    def load_test_next_batch(self, batch_index=0):
+        X_data_files = self.X_test_files[self.batch_size * batch_index:self.batch_size * (batch_index + 1)]
+        Y_data_files = self.Y_test_files[self.batch_size * batch_index:self.batch_size * (batch_index + 1)]
+
+        X_test_batch, Y_test_batch = self.load_X_Y_images(X_data_files, Y_data_files)
+        return X_test_batch, Y_test_batch
+
+    def run(self):
+        while not self.stop_queue:
+            ## train
+            if not self.queue_train.full():
+                if self.train_batch_index>=self.total_train_batch_num:
+                    self.shuffle_train_files()
+                    self.train_batch_index = 0
+                X_b, Y_b = self.load_train_next_batch()
+                self.queue_train.put((X_b, Y_b))
 
 class Data(threading.Thread):
     def __init__(self,config):
@@ -137,7 +240,10 @@ class Data(threading.Thread):
     @staticmethod
     def single_depth_2_pc(in_depth_path):
         '''Converts a depth image to an array of xyz'''
-        depth = img_as_float(io.imread(in_depth_path)[:, :, 0])
+        depth = img_as_float(io.imread(in_depth_path))
+
+        if len(depth.shape)>2:
+            depth = depth[:, :, 0]
 
         h = depth.shape[0]
         w = depth.shape[1]
@@ -224,12 +330,17 @@ class Data(threading.Thread):
                 X_filtered.append(X)
                 Y_filtered.append(Y)
         return X_filtered, Y_filtered
-    def load_X_Y_voxel_grids(self, X_data_files, Y_data_files):
+    def load_X_Y_voxel_grids(self, X_data_files, Y_data_files = None):
         '''
         if len(X_data_files) !=self.batch_size or len(Y_data_files)!=self.batch_size:
             print ("load_X_Y_voxel_grids error:", X_data_files, Y_data_files)
             exit()
         '''
+        if Y_data_files:
+            training = True
+        else:
+            training = False
+            Y_data_files = [None]*len(X_data_files)
 
         X_voxel_grids = []
         Y_voxel_grids = []
@@ -241,13 +352,17 @@ class Data(threading.Thread):
             X_voxel_grid = Data.vox_down_single(X_voxel_grid, self.vox_res_x)
             X_voxel_grids.append(X_voxel_grid)
 
-            Y_voxel_grid = np.reshape(np.load(Y_f), [self.vox_res_y, self.vox_res_y, self.vox_res_y, 1])
-
-            Y_voxel_grids.append(Y_voxel_grid)
+            if training:
+                Y_voxel_grid = np.reshape(np.load(Y_f), [self.vox_res_y, self.vox_res_y, self.vox_res_y, 1])
+                Y_voxel_grids.append(Y_voxel_grid)
 
         X_voxel_grids = np.asarray(X_voxel_grids)
-        Y_voxel_grids = np.asarray(Y_voxel_grids)
-        return X_voxel_grids, Y_voxel_grids
+
+        if training:
+            Y_voxel_grids = np.asarray(Y_voxel_grids)
+            return X_voxel_grids, Y_voxel_grids
+        else:
+            return X_voxel_grids
 
     def shuffle_X_Y_files(self):
 
@@ -370,7 +485,21 @@ class Ops:
 
 if __name__ == '__main__':
     from config import config
-    if sys.version_info>=(2,0):
+
+    d = Data_depth(config)
+    d.start()
+    for epoch in range(2):
+        for i in range(d.total_train_batch_num):
+            x, y = d.queue_train.get()
+            print(d.train_batch_index, x.shape, y.shape)
+    d.stop_queue = True
+
+    print('-'*10)
+    for i in range(d.total_test_seq_batch):
+        x, y = d.load_test_next_batch(i)
+        print('-', x.shape, y.shape)
+
+    '''if sys.version_info>=(2,0):
         print(2)
     if sys.version_info>=(3,0):
         print(3)
@@ -388,4 +517,4 @@ if __name__ == '__main__':
     print('-'*10)
     for i in range(d.total_test_seq_batch):
         x, y = d.load_X_Y_voxel_grids_test_next_batch(i)
-        print('-', x.shape, y.shape)
+        print('-', x.shape, y.shape)'''
